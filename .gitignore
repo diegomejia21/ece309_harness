@@ -1,0 +1,8 @@
+# build products
+harness
+harness_asan
+*.o
+*.dSYM/
+
+# submission artifacts (regenerate with: zip -r github.zip .)
+github.zip
