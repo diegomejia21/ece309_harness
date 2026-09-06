@@ -1,0 +1,9 @@
+# Force LF in the repository and on checkout. Without this, a clone on
+# Windows can hand test.sh CRLF line endings, and bash on the grading
+# machine fails with: /usr/bin/env: 'bash\r': No such file or directory
+* text=auto eol=lf
+*.sh text eol=lf
+*.c  text eol=lf
+*.h  text eol=lf
+*.md text eol=lf
+Makefile text eol=lf
