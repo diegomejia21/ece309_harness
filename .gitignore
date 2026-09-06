@@ -1,6 +1,7 @@
 # build products
 harness
 harness_asan
+*.exe
 *.o
 *.dSYM/
 
