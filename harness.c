@@ -34,6 +34,8 @@
 #include "model.h"
 #include "tools.h"
 
+#include "memcheck.h"  /* no-op unless -DHARNESS_MEMCHECK */
+
 /* One line of user input. Longer lines are truncated safely rather than
  * overflowing (see read_line). */
 #define INPUT_MAX 1024
@@ -151,6 +153,7 @@ int main(void)
     char    line[INPUT_MAX];
     int     status = EXIT_SUCCESS;
 
+    memcheck_init();    /* no-op unless built with -DHARNESS_MEMCHECK */
     context_init(&ctx);
 
     printf("ECE 309 mini-harness (mock model, %d-turn context)\n",

@@ -2,14 +2,15 @@
 #
 #   make          build ./harness
 #   make asan     build ./harness_asan with AddressSanitizer + LeakSanitizer
+#   make memcheck build ./harness_memcheck with portable allocation accounting
 #   make test     build both and run the automated test suite
 #   make clean    remove build products
 
 CC      := gcc
 CFLAGS  := -std=c11 -Wall -Wextra -pedantic -O2
 LDLIBS  := -lm
-SRCS    := harness.c context.c model.c tools.c
-HDRS    := context.h model.h tools.h
+SRCS    := harness.c context.c model.c tools.c memcheck.c
+HDRS    := context.h model.h tools.h memcheck.h
 
 all: harness
 
@@ -23,11 +24,18 @@ harness_asan: $(SRCS) $(HDRS)
 
 asan: harness_asan
 
+# Portable leak check: routes every project malloc/free through counting
+# wrappers and prints a ledger at exit. Needs no external tool.
+harness_memcheck: $(SRCS) $(HDRS)
+	$(CC) $(CFLAGS) -g -DHARNESS_MEMCHECK -o $@ $(SRCS) $(LDLIBS)
+
+memcheck: harness_memcheck
+
 test: harness
 	bash test.sh
 
 clean:
-	rm -f harness harness_asan
+	rm -f harness harness_asan harness_memcheck
 	rm -rf harness.dSYM harness_asan.dSYM
 
-.PHONY: all asan test clean
+.PHONY: all asan memcheck test clean

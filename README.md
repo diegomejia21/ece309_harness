@@ -85,7 +85,8 @@ project.
 | `context.h/.c` | 5-turn ring buffer. Owns every heap copy of turn text and frees it on eviction. |
 | `model.h/.c` | Deterministic mock model. Produces text and *requests* tools; never executes. |
 | `tools.h/.c` | Tool registry plus a recursive-descent arithmetic evaluator. |
-| `test.sh` | Black-box test suite: 30 assertions plus a memory-leak check. |
+| `memcheck.h/.c` | Optional allocation accounting (`-DHARNESS_MEMCHECK`). Compiles to nothing when off. |
+| `test.sh` | Black-box test suite: 38 assertions including two independent leak checks. |
 | `SPEC.md` | The specification the code was generated from. |
 | `vibe_coding_log.md` | Prompts, iterations, and what had to be corrected. |
 
@@ -124,20 +125,41 @@ both are hand-written. The build is warning-free under
 bash test.sh
 ```
 
-30 assertions across four groups — core loop, tool execution, state management,
-and memory safety. The state-management group proves eviction rather than
+38 assertions across four groups — core loop, tool execution, state management,
+and memory safety. Verified on Ubuntu 22.04 / gcc 11.4 / valgrind 3.18.1:
+**38 passed, 0 failed, 0 skipped**. The state-management group proves eviction rather than
 assuming it: seven exchanges add 14 turns, and the final dump must report
 `5 turn(s) held (max 5), 14 total added`, contain `alpha7`, and **not** contain
 `alpha1`.
 
-The memory check runs the binary under `valgrind --leak-check=full`, falling
-back to a `-fsanitize=address,undefined` build. If neither tool is installed the
-script reports `SKIP` loudly — it never passes silently. On Ubuntu/WSL:
+**Two independent leak checks.** The first runs the binary under
+`valgrind --leak-check=full` (falling back to `-fsanitize=address,undefined`):
 
-```bash
-sudo apt install valgrind
-bash test.sh
 ```
+==3455== HEAP SUMMARY:
+==3455==     in use at exit: 0 bytes in 0 blocks
+==3455==   total heap usage: 36 allocs, 36 frees, 9,455 bytes allocated
+==3455== All heap blocks were freed -- no leaks are possible
+==3455== ERROR SUMMARY: 0 errors from 0 contexts
+```
+
+The second **always runs, on any machine**. `make memcheck` builds with
+`-DHARNESS_MEMCHECK`, routing every project `malloc`/`free` through counting
+wrappers that print a ledger at exit:
+
+```
+[memcheck] allocs=34 frees=34 outstanding=0 bytes_outstanding=0 peak_bytes=336 bad_frees=0
+[memcheck] OK: every allocation was freed
+```
+
+It is weaker than valgrind — it sees only this project's allocations and cannot
+detect invalid reads or writes — but it answers the leak question directly and
+needs no external tool, so the memory group is never left with zero evidence on
+a machine without valgrind. It was validated by deliberately removing the
+eviction `free()`, which it caught as `outstanding=9 bytes_outstanding=183`.
+
+Four control paths are checked: normal `exit`, bare EOF, an empty session, and
+50 turns through the 5-slot window.
 
 ## Requirements coverage
 
@@ -147,7 +169,7 @@ bash test.sh
 | 2. Context management (last 5 turns) | `context.c` ring buffer | §3, 10 assertions |
 | 3. Tool execution | `tools.c`, `harness.c:run_turn` | §2, 10 assertions |
 | 4. Vibe coding log | `vibe_coding_log.md` | — |
-| 5. AI-generated tests + leak check | `test.sh` | §4 |
+| 5. AI-generated tests + leak check | `test.sh`, `memcheck.c` | §4, 8 assertions |
 
 ## Environment
 

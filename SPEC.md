@@ -222,11 +222,21 @@ It must cover:
   dump, so earlier echoes in the running transcript cannot make it pass by
   accident. Also: a short session is not padded to 5; `/help` consumes no slot;
   a tool exchange costs 3 slots; a 3000-character line does not corrupt the loop.
-* **Memory** — a session that fills the window past capacity, runs a successful
-  tool and a failing tool, then exits, run under `valgrind --leak-check=full`
-  with `--error-exitcode=99`. If valgrind is absent, fall back to a
-  `-fsanitize=address,undefined` build. If neither is available, report SKIP
-  loudly — never a silent pass.
+* **Memory** — two independent checks, because a skipped check reads like a
+  passed one:
+  1. `valgrind --leak-check=full --error-exitcode=99` over a session that fills
+     the window past capacity and runs both a successful and a failing tool.
+     Falls back to `-fsanitize=address,undefined` where valgrind is absent.
+  2. A **portable** check that always runs: the `-DHARNESS_MEMCHECK` build
+     (`memcheck.c`) wraps every project `malloc`/`free` in counting wrappers and
+     prints a ledger to stderr at exit. `test.sh` asserts `outstanding=0` and
+     `bad_frees=0` across four control paths — normal `exit`, bare EOF, an empty
+     session, and 50 turns through the 5-slot window.
+
+  The instrumentation must compile to nothing without the flag, must report even
+  when zero allocations occur (so `memcheck_init()` is called from `main`, not
+  registered lazily on first `malloc`), and must be validated by deliberately
+  removing a `free()` to confirm it can actually fail.
 
 Exit code 0 iff every assertion passed.
 
@@ -244,4 +254,4 @@ beyond byte-level pass-through.
 | 2. Context management | `context.c` | test.sh §3 |
 | 3. Tool execution | `tools.c`, `harness.c:run_turn` | test.sh §2 |
 | 4. Vibe coding log | `vibe_coding_log.md` | — |
-| 5. AI-generated testing | `test.sh` | test.sh §4 |
+| 5. AI-generated testing | `test.sh`, `memcheck.c` | test.sh §4 |

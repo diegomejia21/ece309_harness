@@ -239,3 +239,108 @@ ALL TESTS PASSED
   wrong reason.
 * Treat compiler warnings as build failures from the first commit; `-Wextra
   -pedantic` was set before any code was generated, not bolted on afterwards.
+
+---
+
+## 7. Follow-up session: closing the memory-safety gap
+
+The suite shipped with its memory group reporting `SKIP` — 30 assertions passing
+and one unverified. That is the weakest possible state for a test suite to be
+in, because a skipped check *reads* like a passed one at a glance. Two fixes
+were applied.
+
+### 7.1 A portable leak checker (`memcheck.c`)
+
+**Prompt:**
+
+> The leak check skips on Windows because MinGW has neither valgrind nor
+> AddressSanitizer. Add a portable fallback: a `-DHARNESS_MEMCHECK` build that
+> routes every project `malloc`/`free` through counting wrappers and prints a
+> ledger at exit. It must compile to *nothing* when the flag is absent, and
+> `test.sh` must assert on the ledger so the memory group always produces
+> evidence.
+
+Design: each block carries a header holding its size and a magic value, so
+`free` can subtract the payload from the running total and reject a pointer it
+never issued. The magic is poisoned on free, which catches double frees. The
+ledger goes to **stderr** so it cannot contaminate the stdout transcript the
+behavioural assertions grep through.
+
+Honest limitation, stated in the header comment: this sees only *this project's*
+allocations and cannot detect invalid reads or writes. It is strictly weaker
+than valgrind. It answers one question — did every `malloc` get a matching
+`free` — and it runs everywhere.
+
+### 7.2 Negative control — proving the checker can fail
+
+A leak detector that cannot go red is decoration. The eviction `free()` in
+`context_add` was deliberately deleted and the instrumented binary re-run:
+
+```
+[memcheck] allocs=21 frees=12 outstanding=9 bytes_outstanding=183 peak_bytes=354 bad_frees=0
+[memcheck] FAIL: memory was leaked or misfreed
+```
+
+Caught, exactly as intended. The source was then restored and verified against
+`git diff` to confirm the only remaining change was the added include.
+
+### 7.3 A real bug the new tests found
+
+Adding the memcheck assertions immediately turned one red:
+
+```
+[FAIL] memcheck: empty session is clean
+       expected to find: outstanding=0
+```
+
+**Cause:** `atexit(memcheck_report)` was registered lazily, on the first
+`malloc`. A session that allocates nothing therefore printed **no ledger at
+all** — and an assertion looking for `outstanding=0` in empty output fails.
+Worse, had the assertion been written the other way round it would have *passed*
+on no evidence whatsoever.
+
+**Fix:** an explicit `memcheck_init()` called from the top of `main`, expanding
+to `((void)0)` when the feature is compiled out. The report is now armed before
+any work happens.
+
+This is the second time in this project a test failed for a reason worth
+keeping (the first was the `alpha1` transcript-scoping bug in §3, Iteration 4).
+Both were found by writing the assertion first and distrusting the green.
+
+### 7.4 Running valgrind for real
+
+No Ubuntu WSL distro was installed, so verification ran in a container instead:
+
+```bash
+docker run --rm -v "C:/Users/dm/ece309_harness:/src" -w /src ubuntu:22.04 \
+  bash -c "apt-get install -y gcc valgrind && cd /tmp && cp /src/* . && bash test.sh"
+```
+
+First attempt failed on a Windows path-mangling quirk in MSYS
+(`the working directory 'C:/Program Files/Git/src' is invalid`), fixed with
+`MSYS_NO_PATHCONV=1`.
+
+Second attempt failed with `test.sh: line 15: $'\r': command not found` — the
+**exact** CRLF failure that `.gitattributes` was added to prevent, reproduced
+live. The committed files were LF, but the Windows working copy had CRLF and the
+container mounted the working copy, not a clone. Working tree normalised to LF.
+(A first attempt to detect the CRs with `grep -q $'\r'` silently matched nothing
+and reported all files clean; `od -c` showed 243 CRs in `test.sh`. Verify with a
+tool that counts, not one that merely answers yes/no.)
+
+Final result on Ubuntu 22.04, gcc 11.4.0, valgrind 3.18.1:
+
+```
+==3455== HEAP SUMMARY:
+==3455==     in use at exit: 0 bytes in 0 blocks
+==3455==   total heap usage: 36 allocs, 36 frees, 9,455 bytes allocated
+==3455== All heap blocks were freed -- no leaks are possible
+==3455== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+
+passed: 38   failed: 0   skipped: 0
+ALL TESTS PASSED
+```
+
+Four control paths were checked under valgrind independently: normal `exit`,
+bare EOF with no `exit` typed, an empty session, and 50 turns forced through the
+5-slot window. All clean.

@@ -10,6 +10,8 @@
 #include <ctype.h>
 #include <stdarg.h>
 
+#include "memcheck.h"  /* no-op unless -DHARNESS_MEMCHECK */
+
 #define TOOL_MARKER_OPEN  "[[TOOL:"
 #define TOOL_MARKER_CLOSE "]]"
 

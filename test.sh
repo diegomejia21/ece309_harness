@@ -193,9 +193,41 @@ elif gcc -fsanitize=address -x c /dev/null -o /dev/null 2>/dev/null; then
   fi
 
 else
-  skip "leak check (install valgrind, or use a gcc/clang with -fsanitize=address)"
-  echo "        On Ubuntu/WSL:  sudo apt install valgrind"
-  echo "        Then re-run:    bash test.sh"
+  skip "valgrind / AddressSanitizer not available on this machine"
+  echo "        For the strongest check:  sudo apt install valgrind  (Linux/WSL)"
+fi
+
+# Portable fallback that ALWAYS runs: the -DHARNESS_MEMCHECK build routes
+# every project malloc/free through counting wrappers and prints a ledger
+# at exit. Weaker than valgrind -- it cannot see invalid reads or writes --
+# but it answers the leak question directly and needs no external tool, so
+# the memory group is never left with zero evidence.
+if gcc -std=c11 -Wall -Wextra -pedantic -g -DHARNESS_MEMCHECK        -o harness_memcheck harness.c context.c model.c tools.c memcheck.c -lm 2>/dev/null; then
+
+  # Exercise every allocating path: greeting, a tool success, a tool
+  # failure, enough turns to force evictions, then a normal shutdown.
+  ledger=$(printf '%b' "$LEAK_INPUT" | ./harness_memcheck 2>&1 >/dev/null)
+  assert_contains "memcheck: every allocation freed" "$ledger" "outstanding=0"
+  assert_contains "memcheck: no bad or double frees"  "$ledger" "bad_frees=0"
+  assert_contains "memcheck: verdict OK"              "$ledger" "OK: every allocation was freed"
+
+  # The EOF path (no 'exit' typed) is a separate control path and must
+  # free the context too.
+  ledger=$(printf 'hello
+calc 1+1' | ./harness_memcheck 2>&1 >/dev/null)
+  assert_contains "memcheck: EOF path frees context"  "$ledger" "outstanding=0"
+
+  # Empty session: nothing allocated, nothing leaked.
+  ledger=$(printf '' | ./harness_memcheck 2>&1 >/dev/null)
+  assert_contains "memcheck: empty session is clean"  "$ledger" "outstanding=0"
+
+  # Heavy eviction: 50 turns through a 5-slot window frees ~45 texts.
+  many=$(awk 'BEGIN{for(i=1;i<=50;i++) print "msg" i; print "exit"}')
+  ledger=$(printf '%s
+' "$many" | ./harness_memcheck 2>&1 >/dev/null)
+  assert_contains "memcheck: 50-turn eviction is clean" "$ledger" "outstanding=0"
+else
+  bad "memcheck build" "could not compile the -DHARNESS_MEMCHECK variant"
 fi
 
 # ---------------------------------------------------------------------

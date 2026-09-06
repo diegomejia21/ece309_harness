@@ -7,6 +7,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "memcheck.h"  /* no-op unless -DHARNESS_MEMCHECK */
+
 /* strdup() is POSIX, not standard C, so we roll our own to keep the
  * build clean under -std=c11 -Wall -Wextra -pedantic. */
 static char *xstrdup(const char *s)
